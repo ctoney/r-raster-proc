@@ -2,3 +2,6 @@ r-raster-proc
 Various scripts for raster processing and map production in R.
 Chris Toney (christoney at fs.fed.us)
 
+- Use rgdal package for raster io
+- Read a stack of input rasters and calculate new values, e.g., prediction from a fitted model
+- Process row vectors with wrapper functions that can be run parallel
