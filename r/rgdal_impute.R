@@ -98,7 +98,7 @@ read_input_row <- function(scanline) {
 
 	if (use_xy) {
 		df$x <- cell_centers_x
-		df$y <- rep( (ymax-(cellsize/2) + cellsize*scanline), ncols)
+		df$y <- rep( (ymax-(cellsize/2) - (cellsize*scanline)), ncols)
 	}
 
 	return(df)
