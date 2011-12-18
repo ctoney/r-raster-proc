@@ -55,7 +55,7 @@ library(rgdal)
 # read in training data and generate yai object(s) .. 1 yai for now
 print("generating yai object(s)...")
 df_tr <- read.csv(train_data_fn)
-row.names(df_tr) <- df[,1]
+row.names(df_tr) <- df_tr[,1]
 if (slp_asp_transform) {
 	# convert slope/aspect to cartesian coordinates.. Stage (1976) transformation
 	# following the example in yaIpmute doc...
