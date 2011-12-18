@@ -30,8 +30,9 @@ train_data_fn <- "/home/ctoney/work/rf/test/VModelMapData_nntest.csv"
 
 # if use_xy = TRUE then train_data_fn must include columns x and y
 # x,y of pixel centers will be calulated automatically
-use_xy = FALSE
-#write_xy_grid = FALSE # write out xy grid if use_xy = TRUE
+use_xy = TRUE
+write_xy_grids = TRUE # write out xy grids if use_xy = TRUE
+xy_grid_dt = "Int32" # round to nearest meter, or use Float32 instead
 
 # if slp_asp_transform = TRUE, aspect will be transformed to cartesian coordinates
 # train_data_fn must contain columns asp (degrees from north) and slp (slope percent)
@@ -119,6 +120,7 @@ for (r in 1:length(raster_lut[,1])) {
 # a function to read a row from the input raster stack
 read_input_row <- function(scanline) {
 	# scanline is a scanline (row) number to process
+	# assumes gd_list is populated
 	# returns a dataframe with the input rows in named colums
 
 	ncols <- dim(gd_list[[1]])[2]
@@ -156,6 +158,7 @@ read_input_row <- function(scanline) {
 # a wraper function for a predict method
 predict.wrapper <- function(df_trg) {
 # assumes the yai object list has been exported to the cluster
+# assumes dst GDAL dataset is available for writing output
 	yai.nnref <- newtargets(yai_list[[1]], df_trg)
 	return(yai.nnref$neiIdsTrgs)
 }
@@ -171,7 +174,7 @@ process_row <- function(scanline) {
 
 		# chunk each row:
 		# parallelize in n chunks, n = number of cpus
-		# the chunking adds overhead, is this faster in parallel?...
+		# is this faster in parallel?...
 		df_in$chunk <- rep(1:ncpus, length.out=ncols)
 		chunks <- split(df_in, df_in$chunk)
 		chunks_out <- sfClusterApplyLB(chunks, predict.wrapper)
@@ -188,6 +191,13 @@ process_row <- function(scanline) {
 	a[is.na(a)] <- nodata_value
 	putRasterData(dst, a, band=1, offset=c(scanline,0))
 
+	if (write_xy_grids) {
+		a <- array(unlist(df_in$x), dim=c(ncols, 1))
+		putRasterData(dst_x, a, band=1, offset=c(scanline,0))
+		a <- array(unlist(df_in$y), dim=c(ncols, 1))
+		putRasterData(dst_y, a, band=1, offset=c(scanline,0))
+	}
+
 	return()
 }
 
@@ -196,6 +206,10 @@ sfExportAll()
 
 # a transient dataset to hold the output
 dst <- new('GDALTransientDataset', driver=new('GDALDriver', out_raster_fmt), rows=nrows, cols=ncols, bands=1, type=out_raster_dt)
+if (write_xy_grids) {
+	dst_x <- new('GDALTransientDataset', driver=new('GDALDriver', out_raster_fmt), rows=nrows, cols=ncols, bands=1, type=xy_grid_dt)
+	dst_y <- new('GDALTransientDataset', driver=new('GDALDriver', out_raster_fmt), rows=nrows, cols=ncols, bands=1, type=xy_grid_dt)
+}
 
 # process by rows:
 print("processing...")
@@ -204,9 +218,17 @@ print(t)
 
 print("cluster processing done...")
 
-# save the ouput dataset
+# save the ouput dataset(s)
 saveDataset(dst, out_raster_fn)
 GDAL.close(dst)
+if (write_xy_grids) {
+	x_fn <- sub( basename(out_raster_fn), sub(".", "_x.", basename(out_raster_fn), fixed=TRUE), out_raster_fn, fixed=TRUE )
+	y_fn <- sub( basename(out_raster_fn), sub(".", "_y.", basename(out_raster_fn), fixed=TRUE), out_raster_fn, fixed=TRUE )
+	saveDataset(dst_x, x_fn)
+	saveDataset(dst_y, y_fn)
+	GDAL.close(dst_x)
+	GDAL.close(dst_y)
+}
 
 # close the input datasets
 lapply(gd_list, GDAL.close)
