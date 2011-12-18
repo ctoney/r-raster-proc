@@ -19,7 +19,7 @@
 
 # uses global variables, functions assume certain variables are present
 
-run_parallel = FALSE
+run_parallel = TRUE
 ncpus = 2
 
 # format of training data is observation id, x1, x2, ...
@@ -29,7 +29,7 @@ train_data_fn <- "/home/ctoney/work/rf/test/VModelMapData_nntest.csv"
 
 # if use_xy = TRUE then train_data_fn must include columns x and y
 # x,y of pixel centers will be calulated automatically
-use_xy = TRUE
+use_xy = FALSE
 
 # if slp_asp_transform = TRUE, aspect will be transformed to cartesian coordinates
 # train_data_fn must contain columns asp (degrees from north) and slp (slope percent)
@@ -40,7 +40,7 @@ yai_method = "mahalanobis"
 
 # format of raster lut (no header): raster file path, var name, band num:
 raster_lut_fn <- "/home/ctoney/work/rf/test/VModelMapData_LUT.csv"
-out_raster_fn <- "/home/ctoney/work/rf/test/nn_test.img"
+out_raster_fn <- "/home/ctoney/work/rf/test/nn_test_par.img"
 out_raster_fmt <- "HFA"
 out_raster_dt <- "Int16"
 nodata_value <- -9999
@@ -59,6 +59,7 @@ row.names(df_tr) <- df_tr[,1]
 if (slp_asp_transform) {
 	# convert slope/aspect to cartesian coordinates.. Stage (1976) transformation
 	# following the example in yaIpmute doc...
+	print("transforming slp/asp to cartesian...")
 	polar <- data.frame( c(df_tr$slp*.01, df_tr$asp*(pi/180)) )
 	cartesian <- t(apply(polar,1,function (x) {return (c(x[1]*cos(x[2]),x[1]*sin(x[2]))) }))
 	df_tr$slp_asp_x <- cartesian[,1]
@@ -84,10 +85,11 @@ ymax <- sp.rast@bbox[2,1]
 cellsize <- sp.rast@grid@cellsize[1]
 close(sp.rast)
 if (use_xy) {
+	print("using x,y...")
 	cell_centers_x <- seq(from=xmin+(cellsize/2), by=cellsize, length.out=ncols)
 }
 
-# build a list of GDAL datasets for the rasters
+# open a list of GDAL datasets for the rasters
 gd_list <- list()
 for (r in 1:length(raster_lut[,1])) {
 	print(raster_lut[r,1])
@@ -128,7 +130,7 @@ read_input_row <- function(scanline) {
 
 	if (use_xy) {
 		df$x <- cell_centers_x
-		df$y <- rep( (ymax-(cellsize/2) - (cellsize*scanline)), ncols)
+		df$y <- rep( ( ymax-(cellsize/2) - (cellsize*scanline) ), ncols)
 	}
 
 	if (slp_asp_transform) {
@@ -145,35 +147,33 @@ read_input_row <- function(scanline) {
 }
 
 # a wraper function for a predict method
-predict.wrapper <- function(df) {
+predict.wrapper <- function(df_trg) {
 # assumes the yai object list has been exported to the cluster
-	yai.nnref <- newtargets(yai_list[[1]], df)
+	yai.nnref <- newtargets(yai_list[[1]], df_trg)
 	return(yai.nnref$neiIdsTrgs)
 }
 
 # a function to calculate row values
 # needs yai object available on the cluster
 process_row <- function(scanline) {
-	# impute across the input vectors
+	# impute across the row vectors
 
-	df <- read_input_row(scanline)
+	df_in <- read_input_row(scanline)
 
 	if (sfParallel()) {
 
 		# chunk each row:
 		# parallelize in n chunks, n = number of cpus
 		# the chunking adds overhead, is this faster in parallel?...
-		df$chunk <- rep(1:ncpus, length.out=ncols)
-		chunks <- split(df, df$chunk)
+		df_in$chunk <- rep(1:ncpus, length.out=ncols)
+		chunks <- split(df_in, df_in$chunk)
 		chunks_out <- sfClusterApplyLB(chunks, predict.wrapper)
-		df_out <- unsplit(chunks_out, df$chunk)
-		outline <- as.numeric(df_out[,1])
+		outline <- as.numeric(unsplit(chunks_out, df_in$chunk))
 
 	}
 	else {
 		# sequential execution:
-		yai.nnref <- newtargets(yai_list[[1]], df)
-		outline <- as.numeric(yai.nnref$neiIdsTrgs[,1])
+		outline <- as.numeric(predict.wrapper(df_in)[,1])
 	}
 
 	return(outline)
