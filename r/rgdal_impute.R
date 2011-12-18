@@ -1,22 +1,43 @@
-# plot id imputation using yaImpute
-# raster io using rgdal
-# parallel using snowfall
-# v. 0.1
+# impute reference plot ids into target pixels using yaImpute
+# Chris Toney (christoney at fs.fed.us)
 
-# source("/home/ctoney/src/r-raster-tools/r/rgdal_impute.R")
+# imputation of reference plots can be automatically constrained to specific
+# landscape strata
+
+# raster IO using rgdal
+# parallel using snowfall
+
+#******************************************************************************
+#  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+#  OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+#  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+#  THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+#  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+#  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+#  DEALINGS IN THE SOFTWARE.
+#******************************************************************************
 
 # uses global variables, functions assume certain variables are present
 
 run_parallel = FALSE
 ncpus = 2
+
 # format of training data is observation id, x1, x2, ...
 # header has column names that match the variable names in raster lut
 # id should be a 16-bit int:
 train_data_fn <- "/home/ctoney/work/rf/test/VModelMapData_nntest.csv"
+
 # if use_xy = TRUE then train_data_fn must include columns x and y
+# x,y of pixel centers will be calulated automatically
 use_xy = TRUE
-# methods for yai object in package yaImpute
+
+# if slp_asp_transform = TRUE, aspect will be transformed to cartesian coordinates
+# train_data_fn must contain columns asp (degrees from north) and slp (slope percent)
+slp_asp_transform = FALSE
+
+# method for yai object in package yaImpute
 yai_method = "mahalanobis"
+
 # format of raster lut (no header): raster file path, var name, band num:
 raster_lut_fn <- "/home/ctoney/work/rf/test/VModelMapData_LUT.csv"
 out_raster_fn <- "/home/ctoney/work/rf/test/nn_test.img"
@@ -33,10 +54,19 @@ library(rgdal)
 
 # read in training data and generate yai object(s) .. 1 yai for now
 print("generating yai object(s)...")
-df <- read.csv(train_data_fn)
-row.names(df) <- df[,1]
+df_tr <- read.csv(train_data_fn)
+row.names(df_tr) <- df[,1]
+if (slp_asp_transform) {
+	# convert slope/aspect to cartesian coordinates.. Stage (1976) transformation
+	# following the example in yaIpmute doc...
+	polar <- data.frame( c(df_tr$slp*.01, df_tr$asp*(pi/180)) )
+	cartesian <- t(apply(polar,1,function (x) {return (c(x[1]*cos(x[2]),x[1]*sin(x[2]))) }))
+	df_tr$slp_asp_x <- cartesian[,1]
+	df_tr$slp_asp_y <- cartesian[,2]
+	df_tr$asp <- NULL
+}
 yai_list <- list()
-yai_list[[1]] <- yai(x=df[,-1], noTrgs=TRUE, noRefs=TRUE, method=yai_method)
+yai_list[[1]] <- yai(x=df_tr[,-1], noTrgs=TRUE, noRefs=TRUE, method=yai_method)
 print(yai_list[[1]])
 
 raster_lut <- read.table(file=raster_lut_fn,sep=",",header=FALSE,check.names=FALSE,stringsAsFactors=FALSE)
@@ -101,6 +131,16 @@ read_input_row <- function(scanline) {
 		df$y <- rep( (ymax-(cellsize/2) - (cellsize*scanline)), ncols)
 	}
 
+	if (slp_asp_transform) {
+		# convert slope/aspect to cartesian coordinates.. Stage (1976) transformation
+		# following the example in yaIpmute doc...
+		polar <- data.frame( c(df$slp*.01, df$asp*(pi/180)) )
+		cartesian <- t(apply(polar,1,function (x) {return (c(x[1]*cos(x[2]),x[1]*sin(x[2]))) }))
+		df$slp_asp_x <- cartesian[,1]
+		df$slp_asp_y <- cartesian[,2]
+		df$asp <- NULL
+	}
+
 	return(df)
 }
 
@@ -131,9 +171,9 @@ process_row <- function(scanline) {
 
 	}
 	else {
-	# sequential execution:
-	yai.nnref <- newtargets(yai_list[[1]], df)
-	outline <- as.numeric(yai.nnref$neiIdsTrgs[,1])
+		# sequential execution:
+		yai.nnref <- newtargets(yai_list[[1]], df)
+		outline <- as.numeric(yai.nnref$neiIdsTrgs[,1])
 	}
 
 	return(outline)
@@ -154,7 +194,7 @@ lapply(gd_list, GDAL.close)
 
 sfStop()
 
-# **output has a 1-based index (index-1 to get raster row numbers)
+# **output has a 1-based index** (index-1 to get raster row numbers)
 
 # write the ouput
 print("writing output raster...")
