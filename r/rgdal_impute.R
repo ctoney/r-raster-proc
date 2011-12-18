@@ -1,8 +1,9 @@
 # impute reference plot ids into target pixels using yaImpute
 # Chris Toney (christoney at fs.fed.us)
 
-# imputation of reference plots can be automatically constrained to specific
-# landscape strata
+# TO DO:
+# imputation of reference plot subsets can be automatically constrained to 
+# specified landscape strata
 
 # raster IO using rgdal
 # parallel using snowfall
@@ -19,7 +20,7 @@
 
 # uses global variables, functions assume certain variables are present
 
-run_parallel = TRUE
+run_parallel = FALSE
 ncpus = 2
 
 # format of training data is observation id, x1, x2, ...
@@ -30,6 +31,7 @@ train_data_fn <- "/home/ctoney/work/rf/test/VModelMapData_nntest.csv"
 # if use_xy = TRUE then train_data_fn must include columns x and y
 # x,y of pixel centers will be calulated automatically
 use_xy = FALSE
+#write_xy_grid = FALSE # write out xy grid if use_xy = TRUE
 
 # if slp_asp_transform = TRUE, aspect will be transformed to cartesian coordinates
 # train_data_fn must contain columns asp (degrees from north) and slp (slope percent)
@@ -40,7 +42,7 @@ yai_method = "mahalanobis"
 
 # format of raster lut (no header): raster file path, var name, band num:
 raster_lut_fn <- "/home/ctoney/work/rf/test/VModelMapData_LUT.csv"
-out_raster_fn <- "/home/ctoney/work/rf/test/nn_test_par.img"
+out_raster_fn <- "/home/ctoney/work/rf/test/nn_test_seq.img"
 out_raster_fmt <- "HFA"
 out_raster_dt <- "Int16"
 nodata_value <- -9999
@@ -56,6 +58,9 @@ library(rgdal)
 print("generating yai object(s)...")
 df_tr <- read.csv(train_data_fn)
 row.names(df_tr) <- df_tr[,1]
+
+#if (use_xy) { ... TO DO: check whether columns x and y are in ref data
+
 if (slp_asp_transform) {
 	# convert slope/aspect to cartesian coordinates.. Stage (1976) transformation
 	# following the example in yaIpmute doc...
@@ -66,10 +71,12 @@ if (slp_asp_transform) {
 	df_tr$slp_asp_y <- cartesian[,2]
 	df_tr$asp <- NULL
 }
+
 yai_list <- list()
 yai_list[[1]] <- yai(x=df_tr[,-1], noTrgs=TRUE, noRefs=TRUE, method=yai_method)
 print(yai_list[[1]])
 
+# populate a table of raster names and corresponding variable names
 raster_lut <- read.table(file=raster_lut_fn,sep=",",header=FALSE,check.names=FALSE,stringsAsFactors=FALSE)
 
 # assuming all input rasters have same extent and cell size
