@@ -18,7 +18,7 @@
 #  DEALINGS IN THE SOFTWARE.
 #******************************************************************************
 
-# uses global variables, functions assume certain variables are present
+# uses global variables... functions assume certain objects are present
 
 run_parallel = FALSE
 ncpus = 2
@@ -183,38 +183,35 @@ process_row <- function(scanline) {
 		outline <- as.numeric(predict.wrapper(df_in)[,1])
 	}
 
-	return(outline)
+	# write a row of output to the transient dataset
+	a <- array(unlist(outline), dim=c(ncols, 1))
+	a[is.na(a)] <- nodata_value
+	putRasterData(dst, a, band=1, offset=c(scanline,0))
+
+	return()
 }
 
 
 sfExportAll()
-print("processing...")
+
+# a transient dataset to hold the output
+dst <- new('GDALTransientDataset', driver=new('GDALDriver', out_raster_fmt), rows=nrows, cols=ncols, bands=1, type=out_raster_dt)
 
 # process by rows:
-t <- system.time( output <- lapply(0:(nrows-1), process_row) )
+print("processing...")
+t <- system.time( lapply(0:(nrows-1), process_row) )
 print(t)
 
 print("cluster processing done...")
 
-# close the GDAL datasets
-lapply(gd_list, GDAL.close)
-
-sfStop()
-
-# **output has a 1-based index** (index-1 to get raster row numbers)
-
-# write the ouput
-print("writing output raster...")
-dst <- new('GDALTransientDataset', driver=new('GDALDriver', out_raster_fmt), rows=nrows, cols=ncols, bands=1, type=out_raster_dt)
-for (y in 0:(nrows-1)) {
-	a <- array(unlist(output[[(y+1)]]), dim=c(ncols, 1))
-	a[is.na(a)] <- nodata_value
-	putRasterData(dst, a, band=1, offset=c(y,0))
-}
+# save the ouput dataset
 saveDataset(dst, out_raster_fn)
 GDAL.close(dst)
 
-rm(output)
+# close the input datasets
+lapply(gd_list, GDAL.close)
+
+sfStop()
 
 print("done.")
 
