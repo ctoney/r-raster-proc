@@ -20,18 +20,25 @@
 
 # uses global variables... functions assume certain objects are present
 
+# BEGIN configuration section
+
 run_parallel = FALSE
 ncpus = 2
 
-# format of training data is observation id, x1, x2, ...
+# if use_strata = TRUE, second column of training data should have strata ids
+# strata ids should be 16-bit integers
+# the first input raster in the raster lut should be the strata id grid
+use_strata = FALSE
+
+# format of training data is observation id, [strata_id], x1, x2, ...
 # header has column names that match the variable names in raster lut
 # id should be a 16-bit int:
 train_data_fn <- "/home/ctoney/work/rf/test/VModelMapData_nntest.csv"
 
 # if use_xy = TRUE then train_data_fn must include columns x and y
 # x,y of pixel centers will be calulated automatically
-use_xy = TRUE
-write_xy_grids = TRUE # write out xy grids if use_xy = TRUE
+use_xy = FALSE
+write_xy_grids = FALSE # write out xy grids if use_xy = TRUE
 xy_grid_dt = "Int32" # round to nearest meter, or use Float32 instead
 
 # if slp_asp_transform = TRUE, aspect will be transformed to cartesian coordinates
@@ -47,6 +54,8 @@ out_raster_fn <- "/home/ctoney/work/rf/test/nn_test_seq.img"
 out_raster_fmt <- "HFA"
 out_raster_dt <- "Int16"
 nodata_value <- -9999
+
+# END configuration section
 
 library(snowfall)
 
@@ -73,9 +82,29 @@ if (slp_asp_transform) {
 	df_tr$asp <- NULL
 }
 
-yai_list <- list()
-yai_list[[1]] <- yai(x=df_tr[,-1], noTrgs=TRUE, noRefs=TRUE, method=yai_method)
-print(yai_list[[1]])
+if (use_strata) {
+	# second column of df_tr has the strata ids
+	
+	# a yai object for all ref plots
+	yai.allrefs <- yai(x=df_tr[,-1:-2], noTrgs=TRUE, noRefs=TRUE, method=yai_method)
+
+	# yai objects for strata subsets
+	subsets.df_tr <- split(df_tr, df_tr[,2])
+	strata_ids <- unique(df_tr[,2])
+	yai.strata <- list()
+	for (id in strata_ids) {
+		idx <- which( names(subsets.df_tr) == as.character(id) )
+		if ( length(subsets.df_tr[[idx]][,1]) > 1 ) {
+			yai.strata[[id]] <- yai(x=subsets.df_tr[[idx]][,-1:-2], noTrgs=TRUE, noRefs=TRUE, method=yai_method)
+		} else {
+			# the reference plot id
+			yai.strata[[id]] <- subsets.df_tr[[idx]][1,1]
+		}
+	}
+} else {
+	yai.allrefs <- yai(x=df_tr[,-1], noTrgs=TRUE, noRefs=TRUE, method=yai_method)
+	#print(yai.allrefs)
+}
 
 # populate a table of raster names and corresponding variable names
 raster_lut <- read.table(file=raster_lut_fn,sep=",",header=FALSE,check.names=FALSE,stringsAsFactors=FALSE)
@@ -155,23 +184,22 @@ read_input_row <- function(scanline) {
 	return(df)
 }
 
-# a wraper function for a predict method
-predict.wrapper <- function(df_trg) {
+# a wraper function for a predict method.. yaImpute in this case
+predict.wrapper <- function(df) {
 # assumes the yai object list has been exported to the cluster
-# assumes dst GDAL dataset is available for writing output
-	yai.nnref <- newtargets(yai_list[[1]], df_trg)
+	yai.nnref <- newtargets(yai.allrefs, df)
 	return(yai.nnref$neiIdsTrgs)
 }
 
 # a function to calculate row values
-# needs yai object available on the cluster
 process_row <- function(scanline) {
-	# impute across the row vectors
+# impute across the row vectors
+# needs yai object available on the cluster
+# assumes dst GDAL dataset is available for writing output
 
 	df_in <- read_input_row(scanline)
 
 	if (sfParallel()) {
-
 		# chunk each row:
 		# parallelize in n chunks, n = number of cpus
 		# is this faster in parallel?...
@@ -180,8 +208,7 @@ process_row <- function(scanline) {
 		chunks_out <- sfClusterApplyLB(chunks, predict.wrapper)
 		outline <- as.numeric(unsplit(chunks_out, df_in$chunk))
 
-	}
-	else {
+	} else {
 		# sequential execution:
 		outline <- as.numeric(predict.wrapper(df_in)[,1])
 	}
