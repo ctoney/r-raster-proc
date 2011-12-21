@@ -21,19 +21,19 @@
 
 # BEGIN configuration section
 
-run_parallel = FALSE
-ncpus = 2
+ncpus = 1
+if (ncpus > 1) {run_parallel = TRUE} else {run_parallel = FALSE}
 
 # if use_strata = TRUE, second column of training data should have strata ids
 # strata ids should be 16-bit integers
 # the first input raster in the raster lut should be the strata id grid
-use_strata = FALSE
+use_strata = TRUE
 
 # format of training data is observation id, [strata_id], x1, x2, ...
 # header has column names that match the variable names in raster lut
 # id should be a 16-bit int:
-train_data_fn <- "/home/ctoney/work/rf/test/VModelMapData_nntest.csv"
-#train_data_fn <- "/home/ctoney/work/rf/test/z19_imp_training_data.csv"
+#train_data_fn <- "/home/ctoney/work/rf/test/VModelMapData_nntest.csv"
+train_data_fn <- "/home/ctoney/work/rf/test/z19_imp_training_data.csv"
 
 # if use_xy = TRUE then train_data_fn must include columns x and y
 # x,y of pixel centers will be calulated automatically
@@ -41,18 +41,19 @@ use_xy = TRUE
 write_xy_grids = FALSE # write out xy grids if use_xy = TRUE
 xy_grid_dt = "Int32" # round to nearest meter, or use Float32 instead
 
-# if slp_asp_transform = TRUE, aspect will be transformed to cartesian coordinates
-# train_data_fn must contain columns asp (degrees from north) and slp (slope percent)
-slp_asp_transform = FALSE
+# if slp_asp_transform = TRUE, aspect will be transformed to cartesian
+# coordinates. train_data_fn must contain columns asp (degrees from north)
+# and slpp (slope percent).
+slp_asp_transform = TRUE
 
 # method for yai object in package yaImpute
 yai_method = "euclidean"
 
 # format of raster lut (no header): raster file path, var name, band num:
-raster_lut_fn <- "/home/ctoney/work/rf/test/VModelMapData_LUT.csv"
-#raster_lut_fn <- "/home/ctoney/work/rf/test/z19_raster_lut.csv"
-out_raster_fn <- "/home/ctoney/work/rf/test/nn_test_seq.img"
-#out_raster_fn <- "/home/ctoney/work/rf/test/z19_piece_test_imp.img"
+#raster_lut_fn <- "/home/ctoney/work/rf/test/VModelMapData_LUT.csv"
+raster_lut_fn <- "/home/ctoney/work/rf/test/z19_raster_lut.csv"
+#out_raster_fn <- "/home/ctoney/work/rf/test/nn_test_seq.img"
+out_raster_fn <- "/home/ctoney/work/rf/test/z19_piece_test_imp.img"
 out_raster_fmt <- "HFA"
 out_raster_dt <- "Int16"
 nodata_value <- -9999
@@ -73,12 +74,17 @@ row.names(df_tr) <- df_tr[,1]
 
 #if (use_xy) { ... TO DO: check whether columns x and y are in ref data
 
-if (slp_asp_transform) {
+transform.slp_asp <- function(slpp, asp) {
 	# convert slope/aspect to cartesian coordinates.. Stage (1976) transformation
 	# following the example in yaIpmute doc...
-	print("transforming slp/asp to cartesian...")
-	polar <- data.frame( c(df_tr$slp*.01, df_tr$asp*(pi/180)) )
+	polar <- data.frame( slpp*.01, asp*(pi/180) )
 	cartesian <- t(apply(polar,1,function (x) {return (c(x[1]*cos(x[2]),x[1]*sin(x[2]))) }))
+	return(cartesian)
+}
+
+if (slp_asp_transform) {
+	print("transforming slp/asp to cartesian...")
+	cartesian <- transform.slp_asp(df_tr$slpp, df_tr$asp)
 	df_tr$slp_asp_x <- cartesian[,1]
 	df_tr$slp_asp_y <- cartesian[,2]
 	df_tr$asp <- NULL
@@ -183,10 +189,7 @@ read_input_row <- function(scanline) {
 	}
 
 	if (slp_asp_transform) {
-		# convert slope/aspect to cartesian coordinates.. Stage (1976) transformation
-		# following the example in yaIpmute doc...
-		polar <- data.frame( c(df$slp*.01, df$asp*(pi/180)) )
-		cartesian <- t(apply(polar,1,function (x) {return (c(x[1]*cos(x[2]),x[1]*sin(x[2]))) }))
+		cartesian <- transform.slp_asp(df$slpp, df$asp)
 		df$slp_asp_x <- cartesian[,1]
 		df$slp_asp_y <- cartesian[,2]
 		df$asp <- NULL
@@ -202,7 +205,7 @@ predict.wrapper <- function(df) {
 	if (use_strata) {
 		# values of the first raster (col 1) are the strata ids
 
-		df$neiIdsTrgs <- vector(mode="character", length=length(df[,1]))
+		df$neiIdsTrgs <- as.vector(rep(NA, length(df[,1])), mode="character")
 
 		#assign the nodata pixels
 		df[df[,1]==nodata_value, "neiIdsTrgs"] <- nodata_value
