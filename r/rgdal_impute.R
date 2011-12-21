@@ -1,9 +1,8 @@
-# impute reference plot ids into target pixels using yaImpute
+# Impute reference plot ids into target pixels using yaImpute
 # Chris Toney (christoney at fs.fed.us)
 
-# TO DO:
-# imputation of reference plot subsets can be automatically constrained to 
-# specified landscape strata
+# Imputation of the reference plot subsets can be automatically constrained to 
+# specified landscape strata including nodata regions for improved performance.
 
 # raster IO using rgdal
 # parallel using snowfall
@@ -34,10 +33,11 @@ use_strata = FALSE
 # header has column names that match the variable names in raster lut
 # id should be a 16-bit int:
 train_data_fn <- "/home/ctoney/work/rf/test/VModelMapData_nntest.csv"
+#train_data_fn <- "/home/ctoney/work/rf/test/z19_imp_training_data.csv"
 
 # if use_xy = TRUE then train_data_fn must include columns x and y
 # x,y of pixel centers will be calulated automatically
-use_xy = FALSE
+use_xy = TRUE
 write_xy_grids = FALSE # write out xy grids if use_xy = TRUE
 xy_grid_dt = "Int32" # round to nearest meter, or use Float32 instead
 
@@ -46,11 +46,13 @@ xy_grid_dt = "Int32" # round to nearest meter, or use Float32 instead
 slp_asp_transform = FALSE
 
 # method for yai object in package yaImpute
-yai_method = "mahalanobis"
+yai_method = "euclidean"
 
 # format of raster lut (no header): raster file path, var name, band num:
 raster_lut_fn <- "/home/ctoney/work/rf/test/VModelMapData_LUT.csv"
+#raster_lut_fn <- "/home/ctoney/work/rf/test/z19_raster_lut.csv"
 out_raster_fn <- "/home/ctoney/work/rf/test/nn_test_seq.img"
+#out_raster_fn <- "/home/ctoney/work/rf/test/z19_piece_test_imp.img"
 out_raster_fmt <- "HFA"
 out_raster_dt <- "Int16"
 nodata_value <- -9999
@@ -87,23 +89,32 @@ if (use_strata) {
 	
 	# a yai object for all ref plots
 	yai.allrefs <- yai(x=df_tr[,-1:-2], noTrgs=TRUE, noRefs=TRUE, method=yai_method)
+	print(yai.allrefs)
 
 	# yai objects for strata subsets
 	subsets.df_tr <- split(df_tr, df_tr[,2])
 	strata_ids <- unique(df_tr[,2])
 	yai.strata <- list()
+	yai.strata.ids <- vector(mode="integer", 0)
+	idref.strata <- list()
+	idref.strata.ids <- vector(mode="integer", 0)
 	for (id in strata_ids) {
 		idx <- which( names(subsets.df_tr) == as.character(id) )
 		if ( length(subsets.df_tr[[idx]][,1]) > 1 ) {
+			# a yai object for the subset
 			yai.strata[[id]] <- yai(x=subsets.df_tr[[idx]][,-1:-2], noTrgs=TRUE, noRefs=TRUE, method=yai_method)
+			yai.strata.ids <- append(yai.strata.ids, id)
 		} else {
 			# the reference plot id
-			yai.strata[[id]] <- subsets.df_tr[[idx]][1,1]
+			idref.strata[[id]] <- subsets.df_tr[[idx]][1,1]
+			idref.strata.ids <- append(idref.strata.ids, id)
 		}
 	}
+	print(yai.strata)
+
 } else {
 	yai.allrefs <- yai(x=df_tr[,-1], noTrgs=TRUE, noRefs=TRUE, method=yai_method)
-	#print(yai.allrefs)
+	print(yai.allrefs)
 }
 
 # populate a table of raster names and corresponding variable names
@@ -187,8 +198,40 @@ read_input_row <- function(scanline) {
 # a wraper function for a predict method.. yaImpute in this case
 predict.wrapper <- function(df) {
 # assumes the yai object list has been exported to the cluster
-	yai.nnref <- newtargets(yai.allrefs, df)
-	return(yai.nnref$neiIdsTrgs)
+
+	if (use_strata) {
+		# values of the first raster (col 1) are the strata ids
+
+		df$neiIdsTrgs <- vector(mode="character", length=length(df[,1]))
+
+		#assign the nodata pixels
+		df[df[,1]==nodata_value, "neiIdsTrgs"] <- nodata_value
+
+		# strata ids that have only one ref plot... assign that plot id
+		ids <- unique(df[df[,1] %in% idref.strata.ids == TRUE, 1])
+		for (id in ids) {
+			df[df[,1]==id, "neiIdsTrgs"] <- idref.strata[[id]]
+		}
+
+		# strata ids that have yai objects for nearest neighbor imputation
+		ids <- unique(df[df[,1] %in% yai.strata.ids == TRUE, 1])
+		for (id in ids) {
+			df[df[,1]==id, "neiIdsTrgs"] <- newtargets(yai.strata[[id]], df[df[,1]==id, ])$neiIdsTrgs
+		}
+
+		# strata ids that are absent in the reference data... impute from all plots
+		if ( any(is.na(df$neiIdsTrgs)) ) {
+			df[is.na(df[, "neiIdsTrgs"]), "neiIdsTrgs"] <- newtargets(yai.allrefs, df[is.na(df[, "neiIdsTrgs"]), ])$neiIdsTrgs
+		}
+
+		return(df$neiIdsTrgs)
+
+	} else {
+
+		#yai.nnref <- newtargets(yai.allrefs, df)
+		#return(yai.nnref$neiIdsTrgs)
+		return(newtargets(yai.allrefs, df)$neiIdsTrgs)
+	}
 }
 
 # a function to calculate row values
@@ -200,17 +243,17 @@ process_row <- function(scanline) {
 	df_in <- read_input_row(scanline)
 
 	if (sfParallel()) {
-		# chunk each row:
-		# parallelize in n chunks, n = number of cpus
+		# split each row:
+		# parallelize in n pieces, n = number of cpus
 		# is this faster in parallel?...
-		df_in$chunk <- rep(1:ncpus, length.out=ncols)
-		chunks <- split(df_in, df_in$chunk)
-		chunks_out <- sfClusterApplyLB(chunks, predict.wrapper)
-		outline <- as.numeric(unsplit(chunks_out, df_in$chunk))
+		df_in$piece <- rep(1:ncpus, length.out=ncols)
+		pieces <- split(df_in, df_in$piece)
+		pieces_out <- sfClusterApplyLB(pieces, predict.wrapper)
+		outline <- as.numeric(unsplit(pieces_out, df_in$piece))
 
 	} else {
 		# sequential execution:
-		outline <- as.numeric(predict.wrapper(df_in)[,1])
+		outline <- as.numeric(predict.wrapper(df_in))
 	}
 
 	# write a row of output to the transient dataset
