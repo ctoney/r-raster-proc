@@ -1,8 +1,9 @@
 # Impute reference plot ids into target pixels using yaImpute
 # Chris Toney (christoney at fs.fed.us)
 
-# Imputation of the reference plot subsets can be automatically constrained to 
+# Imputation of subsets of reference plot can be automatically constrained to 
 # specified landscape strata including nodata regions for improved performance.
+# ... target groups of reference plots to specific pixels in the output raster.
 
 # raster IO using rgdal
 # parallel using snowfall
@@ -17,7 +18,7 @@
 #  DEALINGS IN THE SOFTWARE.
 #******************************************************************************
 
-# uses global variables... functions assume certain objects are present
+# Uses global variables... functions assume certain objects are present.
 
 # BEGIN configuration section
 
@@ -151,7 +152,7 @@ for (r in 1:length(raster_lut[,1])) {
 	
 }
 
-# not using - this code sets up gd_list on the cluster for parallel input
+# not using - this sets up gd_list on the cluster for parallel input
 #gd_list <- list()
 #r <- 1
 #sfExportAll() #("raster_lut", "gd_list")
@@ -162,10 +163,9 @@ for (r in 1:length(raster_lut[,1])) {
 #	sfClusterEval( r <- r + 1 )
 #}
 
-
 # a function to read a row from the input raster stack
 read_input_row <- function(scanline) {
-	# scanline is a scanline (row) number to process
+	# scanline is a row number to process
 	# assumes gd_list is populated
 	# returns a dataframe with the input rows in named colums
 
@@ -210,13 +210,13 @@ predict.wrapper <- function(df) {
 		#assign the nodata pixels
 		df[df[,1]==nodata_value, "neiIdsTrgs"] <- nodata_value
 
-		# strata ids that have only one ref plot... assign that plot id
+		# strata ids having only one ref plot... assign that plot id
 		ids <- unique(df[df[,1] %in% idref.strata.ids == TRUE, 1])
 		for (id in ids) {
 			df[df[,1]==id, "neiIdsTrgs"] <- idref.strata[[id]]
 		}
 
-		# strata ids that have yai objects for nearest neighbor imputation
+		# strata ids having yai objects for nearest neighbor imputation
 		ids <- unique(df[df[,1] %in% yai.strata.ids == TRUE, 1])
 		for (id in ids) {
 			df[df[,1]==id, "neiIdsTrgs"] <- newtargets(yai.strata[[id]], df[df[,1]==id, ])$neiIdsTrgs
@@ -265,6 +265,7 @@ process_row <- function(scanline) {
 	putRasterData(dst, a, band=1, offset=c(scanline,0))
 
 	if (write_xy_grids) {
+		# write xy rows
 		a <- array(unlist(df_in$x), dim=c(ncols, 1))
 		putRasterData(dst_x, a, band=1, offset=c(scanline,0))
 		a <- array(unlist(df_in$y), dim=c(ncols, 1))
