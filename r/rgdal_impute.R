@@ -3,7 +3,7 @@
 
 # Imputation of subsets of reference plot can be automatically constrained to 
 # specified landscape strata including nodata regions for improved performance.
-# ... target groups of reference plots to specific pixels in the output raster.
+# i.e. target groups of reference plots to specific pixels in the output raster.
 
 # raster IO using rgdal
 # parallel using snowfall
@@ -34,12 +34,12 @@ use_strata = TRUE
 # header has column names that match the variable names in raster lut
 # id should be a 16-bit int:
 #train_data_fn <- "/home/ctoney/work/rf/test/VModelMapData_nntest.csv"
-train_data_fn <- "/home/ctoney/work/rf/test/z19_imp_training_data.csv"
+train_data_fn <- "/home/ctoney/work/rf/test/z19_imp_ref_plots_v1.csv"
 
 # if use_xy = TRUE then train_data_fn must include columns x and y
-# x,y of pixel centers will be calulated automatically
+# x,y of pixel centers will be calculated automatically
 use_xy = TRUE
-write_xy_grids = FALSE # write out xy grids if use_xy = TRUE
+write_xy_grids = TRUE # write out xy grids if use_xy = TRUE
 xy_grid_dt = "Int32" # round to nearest meter, or use Float32 instead
 
 # if slp_asp_transform = TRUE, aspect will be transformed to cartesian
@@ -47,8 +47,9 @@ xy_grid_dt = "Int32" # round to nearest meter, or use Float32 instead
 # and slpp (slope percent).
 slp_asp_transform = TRUE
 
-# method for yai object in package yaImpute
+# parameters for yai object in package yaImpute
 yai_method = "euclidean"
+yai_ann = TRUE # approximate nearest neighbor search, FALSE for brute force
 
 # format of raster lut (no header): raster file path, var name, band num:
 #raster_lut_fn <- "/home/ctoney/work/rf/test/VModelMapData_LUT.csv"
@@ -57,7 +58,7 @@ raster_lut_fn <- "/home/ctoney/work/rf/test/z19_raster_lut.csv"
 out_raster_fn <- "/home/ctoney/work/rf/test/z19_piece_test_imp.img"
 out_raster_fmt <- "HFA"
 out_raster_dt <- "Int16"
-nodata_value <- -9999
+nodata_value <- 0
 
 # END configuration section
 
@@ -95,8 +96,8 @@ if (use_strata) {
 	# second column of df_tr has the strata ids
 	
 	# a yai object for all ref plots
-	yai.allrefs <- yai(x=df_tr[,-1:-2], noTrgs=TRUE, noRefs=TRUE, method=yai_method)
-	print(yai.allrefs)
+	yai.allrefs <- yai(x=df_tr[,-1:-2], noTrgs=TRUE, noRefs=TRUE, method=yai_method, ann=yai_ann)
+	#print(yai.allrefs)
 
 	# yai objects for strata subsets
 	subsets.df_tr <- split(df_tr, df_tr[,2])
@@ -109,7 +110,7 @@ if (use_strata) {
 		idx <- which( names(subsets.df_tr) == as.character(id) )
 		if ( length(subsets.df_tr[[idx]][,1]) > 1 ) {
 			# a yai object for the subset
-			yai.strata[[id]] <- yai(x=subsets.df_tr[[idx]][,-1:-2], noTrgs=TRUE, noRefs=TRUE, method=yai_method)
+			yai.strata[[id]] <- yai(x=subsets.df_tr[[idx]][,-1:-2], noTrgs=TRUE, noRefs=TRUE, method=yai_method, ann=yai_ann)
 			yai.strata.ids <- append(yai.strata.ids, id)
 		} else {
 			# the reference plot id
@@ -117,10 +118,10 @@ if (use_strata) {
 			idref.strata.ids <- append(idref.strata.ids, id)
 		}
 	}
-	print(yai.strata)
+	#print(yai.strata)
 
 } else {
-	yai.allrefs <- yai(x=df_tr[,-1], noTrgs=TRUE, noRefs=TRUE, method=yai_method)
+	yai.allrefs <- yai(x=df_tr[,-1], noTrgs=TRUE, noRefs=TRUE, method=yai_method, ann=yai_ann)
 	print(yai.allrefs)
 }
 
@@ -136,7 +137,7 @@ ncols <- sp.rast@grid@cells.dim[1]
 nrows <- sp.rast@grid@cells.dim[2]
 #print(sp.rast@bbox)
 xmin <- sp.rast@bbox[1,1]
-ymax <- sp.rast@bbox[2,1]
+ymax <- sp.rast@bbox[2,2]
 cellsize <- sp.rast@grid@cellsize[1]
 close(sp.rast)
 if (use_xy) {
@@ -203,11 +204,11 @@ predict.wrapper <- function(df) {
 # assumes the yai object list has been exported to the cluster
 
 	if (use_strata) {
-		# values of the first raster (col 1) are the strata ids
+		# values of the first raster (df column 1) are the strata ids
 
 		df$neiIdsTrgs <- as.vector(rep(NA, length(df[,1])), mode="character")
 
-		#assign the nodata pixels
+		# assign the nodata pixels
 		df[df[,1]==nodata_value, "neiIdsTrgs"] <- nodata_value
 
 		# strata ids having only one ref plot... assign that plot id
