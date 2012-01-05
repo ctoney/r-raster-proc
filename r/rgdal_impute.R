@@ -1,9 +1,10 @@
 # Impute reference plot ids into target pixels using yaImpute
 # Chris Toney (christoney at fs.fed.us)
 
-# Imputation of subsets of reference plot can be automatically constrained to 
+# Imputation of subsets of reference plots can be automatically constrained to 
 # specified landscape strata including nodata regions for improved performance.
-# i.e. target groups of reference plots to specific pixels in the output raster.
+# i.e., groups of reference plots can be targeted to specific pixels in the 
+# output raster.
 
 # raster IO using rgdal
 # parallel using snowfall
@@ -39,10 +40,10 @@ train_data_fn <- "/home/ctoney/work/rf/test/z19_imp_ref_plots_v1.csv"
 # if use_xy = TRUE then train_data_fn must include columns x and y
 # x,y of pixel centers will be calculated automatically
 use_xy = TRUE
-write_xy_grids = TRUE # write out xy grids if use_xy = TRUE
+write_xy_grids = FALSE # write out xy grids if use_xy = TRUE
 xy_grid_dt = "Int32" # round to nearest meter, or use Float32 instead
 
-# if slp_asp_transform = TRUE, aspect will be transformed to cartesian
+# if slp_asp_transform = TRUE, aspect will be transformed to Cartesian
 # coordinates. train_data_fn must contain columns asp (degrees from north)
 # and slpp (slope percent).
 slp_asp_transform = TRUE
@@ -55,7 +56,7 @@ yai_ann = TRUE # approximate nearest neighbor search, FALSE for brute force
 #raster_lut_fn <- "/home/ctoney/work/rf/test/VModelMapData_LUT.csv"
 raster_lut_fn <- "/home/ctoney/work/rf/test/z19_raster_lut.csv"
 #out_raster_fn <- "/home/ctoney/work/rf/test/nn_test_seq.img"
-out_raster_fn <- "/home/ctoney/work/rf/test/z19_piece_test_imp.img"
+out_raster_fn <- "/home/ctoney/work/rf/test/z19_piece_test_imp_2.img"
 out_raster_fmt <- "HFA"
 out_raster_dt <- "Int16"
 nodata_value <- 0
@@ -77,15 +78,15 @@ row.names(df_tr) <- df_tr[,1]
 #if (use_xy) { ... TO DO: check whether columns x and y are in ref data
 
 transform.slp_asp <- function(slpp, asp) {
-	# convert slope/aspect to cartesian coordinates.. Stage (1976) transformation
-	# following the example in yaIpmute doc...
+	# convert slope/aspect to Cartesian coordinates.. Stage (1976) transformation
+	# following the example in yaImpute doc...
 	polar <- data.frame( slpp*.01, asp*(pi/180) )
 	cartesian <- t(apply(polar,1,function (x) {return (c(x[1]*cos(x[2]),x[1]*sin(x[2]))) }))
 	return(cartesian)
 }
 
 if (slp_asp_transform) {
-	print("transforming slp/asp to cartesian...")
+	print("transforming slp/asp to Cartesian...")
 	cartesian <- transform.slp_asp(df_tr$slpp, df_tr$asp)
 	df_tr$slp_asp_x <- cartesian[,1]
 	df_tr$slp_asp_y <- cartesian[,2]
@@ -168,7 +169,7 @@ for (r in 1:length(raster_lut[,1])) {
 read_input_row <- function(scanline) {
 	# scanline is a row number to process
 	# assumes gd_list is populated
-	# returns a dataframe with the input rows in named colums
+	# returns a dataframe with the input rows in named columns
 
 	ncols <- dim(gd_list[[1]])[2]
 
@@ -199,7 +200,7 @@ read_input_row <- function(scanline) {
 	return(df)
 }
 
-# a wraper function for a predict method.. yaImpute in this case
+# a wrapper function for a predict method.. yaImpute in this case
 predict.wrapper <- function(df) {
 # assumes the yai object list has been exported to the cluster
 
@@ -293,7 +294,7 @@ print(t)
 
 print("cluster processing done...")
 
-# save the ouput dataset(s)
+# save the output dataset(s)
 saveDataset(dst, out_raster_fn)
 GDAL.close(dst)
 if (write_xy_grids) {
