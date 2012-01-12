@@ -30,12 +30,13 @@ if (ncpus > 1) {run_parallel = TRUE} else {run_parallel = FALSE}
 # strata ids should be 16-bit integers
 # the first input raster in the raster lut should be the strata id grid
 use_strata = TRUE
+nlevels = 2
 
 # format of training data is observation id, [strata_id], x1, x2, ...
 # header has column names that match the variable names in raster lut
 # id should be a 16-bit int:
 #train_data_fn <- "/home/ctoney/work/rf/test/VModelMapData_nntest.csv"
-train_data_fn <- "/home/ctoney/work/rf/test/z19_imp_ref_plots_v1.csv"
+train_data_fn <- "/home/ctoney/work/rf/test/z19_imp_ref_plots_v1_test.csv"
 
 # if use_xy = TRUE then train_data_fn must include columns x and y
 # x,y of pixel centers will be calculated automatically
@@ -54,7 +55,7 @@ yai_ann = TRUE # approximate nearest neighbor search, FALSE for brute force
 
 # format of raster lut (no header): raster file path, var name, band num:
 #raster_lut_fn <- "/home/ctoney/work/rf/test/VModelMapData_LUT.csv"
-raster_lut_fn <- "/home/ctoney/work/rf/test/z19_raster_lut.csv"
+raster_lut_fn <- "/home/ctoney/work/rf/test/z19_raster_lut_test.csv"
 #out_raster_fn <- "/home/ctoney/work/rf/test/nn_test_seq.img"
 out_raster_fn <- "/home/ctoney/work/rf/test/z19_piece_test_imp_2.img"
 out_raster_fmt <- "HFA"
@@ -94,29 +95,35 @@ if (slp_asp_transform) {
 }
 
 if (use_strata) {
-	# second column of df_tr has the strata ids
-	
+	# columns 2 through <nlevels+1> of df_tr have the strata ids
+
 	# a yai object for all ref plots
-	yai.allrefs <- yai(x=df_tr[,-1:-2], noTrgs=TRUE, noRefs=TRUE, method=yai_method, ann=yai_ann)
+	yai.allrefs <- yai(x=df_tr[,-1:-(nlevels+1)], noTrgs=TRUE, noRefs=TRUE, method=yai_method, ann=yai_ann)
 	#print(yai.allrefs)
 
 	# yai objects for strata subsets
-	subsets.df_tr <- split(df_tr, df_tr[,2])
-	strata_ids <- unique(df_tr[,2])
 	yai.strata <- list()
-	yai.strata.ids <- vector(mode="integer", 0)
+	yai.strata.ids <- list()
 	idref.strata <- list()
-	idref.strata.ids <- vector(mode="integer", 0)
-	for (id in strata_ids) {
-		idx <- which( names(subsets.df_tr) == as.character(id) )
-		if ( length(subsets.df_tr[[idx]][,1]) > 1 ) {
-			# a yai object for the subset
-			yai.strata[[id]] <- yai(x=subsets.df_tr[[idx]][,-1:-2], noTrgs=TRUE, noRefs=TRUE, method=yai_method, ann=yai_ann)
-			yai.strata.ids <- append(yai.strata.ids, id)
-		} else {
-			# the reference plot id
-			idref.strata[[id]] <- subsets.df_tr[[idx]][1,1]
-			idref.strata.ids <- append(idref.strata.ids, id)
+	idref.strata.ids <- list()
+	for (n in 1:nlevels) {
+		subsets.df_tr <- split(df_tr, df_tr[,n+1])
+		strata_ids <- unique(df_tr[,n+1])
+		yai.strata[[n]] <- list()
+		yai.strata.ids[[n]] <- vector(mode="integer", 0)
+		idref.strata[[n]] <- list()
+		idref.strata.ids[[n]] <- vector(mode="integer", 0)
+		for (id in strata_ids) {
+			idx <- which( names(subsets.df_tr) == as.character(id) )
+			if ( length(subsets.df_tr[[idx]][,1]) > 1 ) {
+				# a yai object for the subset
+				yai.strata[[n]][[id]] <- yai(x=subsets.df_tr[[idx]][,-1:-(nlevels+1)], noTrgs=TRUE, noRefs=TRUE, method=yai_method, ann=yai_ann)
+				yai.strata.ids[[n]] <- append(yai.strata.ids[[n]], id)
+			} else {
+				# the reference plot id
+				idref.strata[[n]][[id]] <- subsets.df_tr[[idx]][1,1]
+				idref.strata.ids[[n]] <- append(idref.strata.ids[[n]], id)
+			}
 		}
 	}
 	#print(yai.strata)
@@ -205,23 +212,28 @@ predict.wrapper <- function(df) {
 # assumes the yai object list has been exported to the cluster
 
 	if (use_strata) {
-		# values of the first raster (df column 1) are the strata ids
+		# values of the first <nlevels> rasters (df columns 1-nlevels) are the strata ids
 
 		df$neiIdsTrgs <- as.vector(rep(NA, length(df[,1])), mode="character")
 
 		# assign the nodata pixels
 		df[df[,1]==nodata_value, "neiIdsTrgs"] <- nodata_value
 
-		# strata ids having only one ref plot... assign that plot id
-		ids <- unique(df[df[,1] %in% idref.strata.ids == TRUE, 1])
-		for (id in ids) {
-			df[df[,1]==id, "neiIdsTrgs"] <- idref.strata[[id]]
-		}
+		# strata level <nlevels> is most specific, strata level 1 is most general
+		# try to impute from the most specific level if there are plots, then step 
+		# back to the more general stratification levels...
+		for (n in seq(nlevels, 1, -1)) {
+			# strata ids having only one ref plot... assign that plot id
+			ids <- unique(df[df[,n] %in% idref.strata.ids[[n]] == TRUE, n])
+			for (id in ids) {
+				df[df[,n]==id & is.na(df[, "neiIdsTrgs"]), "neiIdsTrgs"] <- idref.strata[[n]][[id]]
+			}
 
-		# strata ids having yai objects for nearest neighbor imputation
-		ids <- unique(df[df[,1] %in% yai.strata.ids == TRUE, 1])
-		for (id in ids) {
-			df[df[,1]==id, "neiIdsTrgs"] <- newtargets(yai.strata[[id]], df[df[,1]==id, ])$neiIdsTrgs
+			# strata ids having yai objects for nearest neighbor imputation
+			ids <- unique(df[df[,n] %in% yai.strata.ids[[n]] == TRUE, n])
+			for (id in ids) {
+				try(df[df[,n]==id & is.na(df[, "neiIdsTrgs"]), "neiIdsTrgs"] <- newtargets(yai.strata[[n]][[id]], df[df[,n]==id & is.na(df[, "neiIdsTrgs"]), ])$neiIdsTrgs, silent=TRUE)
+			}
 		}
 
 		# strata ids that are absent in the reference data... impute from all plots
