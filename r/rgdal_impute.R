@@ -23,20 +23,20 @@
 
 # BEGIN configuration section
 
-ncpus = 1
+ncpus = 2
 if (ncpus > 1) {run_parallel = TRUE} else {run_parallel = FALSE}
 
 # if use_strata = TRUE, second column of training data should have strata ids
 # strata ids should be 16-bit integers
 # the first input raster in the raster lut should be the strata id grid
 use_strata = TRUE
-nlevels = 2
+nlevels = 1
 
 # format of training data is observation id, [strata_id], x1, x2, ...
 # header has column names that match the variable names in raster lut
 # id should be a 16-bit int:
 #train_data_fn <- "/home/ctoney/work/rf/test/VModelMapData_nntest.csv"
-train_data_fn <- "/home/ctoney/work/rf/test/z19_imp_ref_plots_v1_test.csv"
+train_data_fn <- "/home/ctoney/work/rf/test/z19_imp_ref_plots_v1.csv"
 
 # if use_xy = TRUE then train_data_fn must include columns x and y
 # x,y of pixel centers will be calculated automatically
@@ -55,7 +55,7 @@ yai_ann = TRUE # approximate nearest neighbor search, FALSE for brute force
 
 # format of raster lut (no header): raster file path, var name, band num:
 #raster_lut_fn <- "/home/ctoney/work/rf/test/VModelMapData_LUT.csv"
-raster_lut_fn <- "/home/ctoney/work/rf/test/z19_raster_lut_test.csv"
+raster_lut_fn <- "/home/ctoney/work/rf/test/z19_raster_lut.csv"
 #out_raster_fn <- "/home/ctoney/work/rf/test/nn_test_seq.img"
 out_raster_fn <- "/home/ctoney/work/rf/test/z19_piece_test_imp_2.img"
 out_raster_fmt <- "HFA"
@@ -197,19 +197,19 @@ read_input_row <- function(scanline) {
 		df$y <- rep( ( ymax-(cellsize/2) - (cellsize*scanline) ), ncols)
 	}
 
-	if (slp_asp_transform) {
-		cartesian <- transform.slp_asp(df$slpp, df$asp)
-		df$slp_asp_x <- cartesian[,1]
-		df$slp_asp_y <- cartesian[,2]
-		df$asp <- NULL
-	}
-
 	return(df)
 }
 
 # a wrapper function for a predict method.. yaImpute in this case
 predict.wrapper <- function(df) {
 # assumes the yai object list has been exported to the cluster
+
+	if (slp_asp_transform) {
+		cartesian <- transform.slp_asp(df$slpp, df$asp)
+		df$slp_asp_x <- cartesian[,1]
+		df$slp_asp_y <- cartesian[,2]
+		df$asp <- NULL
+	}
 
 	if (use_strata) {
 		# values of the first <nlevels> rasters (df columns 1-nlevels) are the strata ids
