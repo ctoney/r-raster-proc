@@ -23,8 +23,8 @@
 
 # BEGIN configuration section
 
-ncpus = 2
-if (ncpus > 1) {run_parallel = TRUE} else {run_parallel = FALSE}
+ncpus = 1
+run_parallel = FALSE
 
 # if use_strata = TRUE, second column of training data should have strata ids
 # strata ids should be 16-bit integers
@@ -34,7 +34,7 @@ nlevels = 1
 
 # format of training data is observation id, [strata_id], x1, x2, ...
 # header has column names that match the variable names in raster lut
-# id should be a 16-bit int:
+# id should be compatible with out_raster_dt below:
 #train_data_fn <- "/home/ctoney/work/rf/test/VModelMapData_nntest.csv"
 train_data_fn <- "/home/ctoney/work/rf/test/z19_imp_ref_plots_v1.csv"
 
@@ -65,8 +65,8 @@ nodata_value <- 0
 # END configuration section
 
 library(snowfall)
-
 sfInit(parallel=run_parallel, cpus=ncpus)
+#library(multicore)
 
 sfLibrary(yaImpute)
 library(rgdal)
@@ -208,7 +208,7 @@ predict.wrapper <- function(df) {
 		cartesian <- transform.slp_asp(df$slpp, df$asp)
 		df$slp_asp_x <- cartesian[,1]
 		df$slp_asp_y <- cartesian[,2]
-		df$asp <- NULL
+		#df$asp <- NULL
 	}
 
 	if (use_strata) {
@@ -217,7 +217,7 @@ predict.wrapper <- function(df) {
 		df$neiIdsTrgs <- as.vector(rep(NA, length(df[,1])), mode="character")
 
 		# assign the nodata pixels
-		df[df[,1]==nodata_value, "neiIdsTrgs"] <- nodata_value
+		df[df[,1]==nodata_value | is.na(df[,1]), "neiIdsTrgs"] <- nodata_value
 
 		# strata level <nlevels> is most specific, strata level 1 is most general
 		# try to impute from the most specific level if there are plots, then step 
@@ -241,13 +241,11 @@ predict.wrapper <- function(df) {
 			df[is.na(df[, "neiIdsTrgs"]), "neiIdsTrgs"] <- newtargets(yai.allrefs, df[is.na(df[, "neiIdsTrgs"]), ])$neiIdsTrgs
 		}
 
-		return(df$neiIdsTrgs)
+		return(as.numeric(df$neiIdsTrgs))
 
 	} else {
-
-		#yai.nnref <- newtargets(yai.allrefs, df)
-		#return(yai.nnref$neiIdsTrgs)
-		return(newtargets(yai.allrefs, df)$neiIdsTrgs)
+)
+		return(as.numeric(newtargets(yai.allrefs, df)$neiIdsTrgs))
 	}
 }
 
@@ -259,18 +257,18 @@ process_row <- function(scanline) {
 
 	df_in <- read_input_row(scanline)
 
-	if (sfParallel()) {
+	if (run_parallel) {
 		# split each row:
 		# parallelize in n pieces, n = number of cpus
 		# is this faster in parallel?...
-		df_in$piece <- rep(1:ncpus, length.out=ncols)
-		pieces <- split(df_in, df_in$piece)
-		pieces_out <- sfClusterApplyLB(pieces, predict.wrapper)
-		outline <- as.numeric(unsplit(pieces_out, df_in$piece))
+		idx <- rep(1:ncpus, length.out=ncols)
+		pieces <- split(df_in, idx)
+		pieces_out <- sfLapply(pieces, predict.wrapper)
+		outline <- unsplit(pieces_out, idx)
 
 	} else {
 		# sequential execution:
-		outline <- as.numeric(predict.wrapper(df_in))
+		outline <- predict.wrapper(df_in)
 	}
 
 	# write a row of output to the transient dataset
@@ -286,6 +284,8 @@ process_row <- function(scanline) {
 		putRasterData(dst_y, a, band=1, offset=c(scanline,0))
 	}
 
+	setTxtProgressBar(pb, scanline+1)
+
 	return()
 }
 
@@ -299,12 +299,15 @@ if (write_xy_grids) {
 	dst_y <- new('GDALTransientDataset', driver=new('GDALDriver', out_raster_fmt), rows=nrows, cols=ncols, bands=1, type=xy_grid_dt)
 }
 
+# a progress bar
+pb <- txtProgressBar(min=1, max=nrows, style=3)
+
 # process by rows:
-print("processing...")
+print
+print("processing rows...")
 t <- system.time( lapply(0:(nrows-1), process_row) )
 print(t)
-
-print("cluster processing done...")
+print("row processing complete...")
 
 # save the output dataset(s)
 saveDataset(dst, out_raster_fn)
