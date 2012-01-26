@@ -23,8 +23,8 @@
 
 # BEGIN configuration section
 
-ncpus = 1
-run_parallel = FALSE
+ncpus = 2
+run_parallel = TRUE
 
 # if use_strata = TRUE, second column of training data should have strata ids
 # strata ids should be 16-bit integers
@@ -172,19 +172,23 @@ for (r in 1:length(raster_lut[,1])) {
 #	sfClusterEval( r <- r + 1 )
 #}
 
+# for input rows, need unique row names that are different from refs, for yai newtargets...
+row_names <- rep("t", ncols)
+row_names <- make.unique(row_names, sep="")
+
 # a function to read a row from the input raster stack
 read_input_row <- function(scanline) {
 	# scanline is a row number to process
 	# assumes gd_list is populated
 	# returns a dataframe with the input rows in named columns
 
-	ncols <- dim(gd_list[[1]])[2]
+	#ncols <- dim(gd_list[[1]])[2]
 
-	df <- data.frame(matrix(-9999, ncols, length(raster_lut[,2])))
+	df <- data.frame(matrix(NA, ncols, length(raster_lut[,2])))
 	names(df) <- raster_lut[,2]
-	# need unique row names that are different from refs, for yai newtargets...
-	row_names <- rep("t", ncols)
-	row.names(df) <- make.unique(row_names, sep="")
+
+	# need unique row names that are different from refs, for yai newtargets...	
+	row.names(df) <- row_names
 
 	for (r in 1:length(gd_list)) {
 		src <- gd_list[[r]]
@@ -244,7 +248,7 @@ predict.wrapper <- function(df) {
 		return(as.numeric(df$neiIdsTrgs))
 
 	} else {
-)
+
 		return(as.numeric(newtargets(yai.allrefs, df)$neiIdsTrgs))
 	}
 }
@@ -289,8 +293,9 @@ process_row <- function(scanline) {
 	return()
 }
 
-
+print("exporting global variables to the cluster...")
 sfExportAll()
+print("export completed...")
 
 # a transient dataset to hold the output
 dst <- new('GDALTransientDataset', driver=new('GDALDriver', out_raster_fmt), rows=nrows, cols=ncols, bands=1, type=out_raster_dt)
@@ -299,10 +304,8 @@ if (write_xy_grids) {
 	dst_y <- new('GDALTransientDataset', driver=new('GDALDriver', out_raster_fmt), rows=nrows, cols=ncols, bands=1, type=xy_grid_dt)
 }
 
-# a progress bar
-pb <- txtProgressBar(min=1, max=nrows, style=3)
-
 # process by rows:
+pb <- txtProgressBar(min=1, max=nrows, style=3)
 print
 print("processing rows...")
 t <- system.time( lapply(0:(nrows-1), process_row) )
