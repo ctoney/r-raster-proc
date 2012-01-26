@@ -2,12 +2,10 @@
 # Chris Toney (christoney at fs.fed.us)
 
 # Imputation of subsets of reference plots can be automatically constrained to 
-# specified landscape strata including nodata regions for improved performance.
-# i.e., groups of reference plots can be targeted to specific pixels in the 
-# output raster.
+# specified landscape strata.
 
 # raster IO using rgdal
-# parallel using snowfall
+# parallel using snow/snowfall
 
 #******************************************************************************
 #  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
@@ -23,8 +21,8 @@
 
 # BEGIN configuration section
 
-ncpus = 2
-run_parallel = TRUE
+ncpus = 1
+run_parallel = FALSE
 
 # if use_strata = TRUE, second column of training data should have strata ids
 # strata ids should be 16-bit integers
@@ -35,7 +33,6 @@ nlevels = 1
 # format of training data is observation id, [strata_id], x1, x2, ...
 # header has column names that match the variable names in raster lut
 # id should be compatible with out_raster_dt below:
-#train_data_fn <- "/home/ctoney/work/rf/test/VModelMapData_nntest.csv"
 train_data_fn <- "/home/ctoney/work/rf/test/z19_imp_ref_plots_v1.csv"
 
 # if use_xy = TRUE then train_data_fn must include columns x and y
@@ -54,9 +51,7 @@ yai_method = "euclidean"
 yai_ann = TRUE # approximate nearest neighbor search, FALSE for brute force
 
 # format of raster lut (no header): raster file path, var name, band num:
-#raster_lut_fn <- "/home/ctoney/work/rf/test/VModelMapData_LUT.csv"
 raster_lut_fn <- "/home/ctoney/work/rf/test/z19_raster_lut.csv"
-#out_raster_fn <- "/home/ctoney/work/rf/test/nn_test_seq.img"
 out_raster_fn <- "/home/ctoney/work/rf/test/z19_piece_test_imp_2.img"
 out_raster_fmt <- "HFA"
 out_raster_dt <- "Int16"
@@ -66,7 +61,6 @@ nodata_value <- 0
 
 library(snowfall)
 sfInit(parallel=run_parallel, cpus=ncpus)
-#library(multicore)
 
 sfLibrary(yaImpute)
 library(rgdal)
@@ -256,7 +250,7 @@ predict.wrapper <- function(df) {
 # a function to calculate row values
 process_row <- function(scanline) {
 # impute across the row vectors
-# needs yai object available on the cluster
+# needs yai objects available on the cluster
 # assumes dst GDAL dataset is available for writing output
 
 	df_in <- read_input_row(scanline)
@@ -264,7 +258,6 @@ process_row <- function(scanline) {
 	if (run_parallel) {
 		# split each row:
 		# parallelize in n pieces, n = number of cpus
-		# is this faster in parallel?...
 		idx <- rep(1:ncpus, length.out=ncols)
 		pieces <- split(df_in, idx)
 		pieces_out <- sfLapply(pieces, predict.wrapper)
